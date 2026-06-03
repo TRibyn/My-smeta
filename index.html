@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Смета онлайн</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #ffffff);
+            --text-color: var(--tg-theme-text-color, #000000);
+            --hint-color: var(--tg-theme-hint-color, #999999);
+            --button-color: var(--tg-theme-button-color, #2481cc);
+            --button-text-color: var(--tg-theme-button-text-color, #ffffff);
+            --secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
+            --border-color: rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 16px;
+            box-sizing: border-box;
+            padding-bottom: 80px;
+        }
+
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; margin: 0 0 4px 0; }
+        .header p { font-size: 14px; color: var(--hint-color); margin: 0; }
+
+        .loader {
+            text-align: center;
+            font-size: 16px;
+            color: var(--hint-color);
+            margin-top: 40px;
+        }
+
+        .category-title {
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: var(--hint-color);
+            margin: 20px 0 8px 4px;
+            letter-spacing: 0.5px;
+        }
+
+        .card-list { background-color: var(--secondary-bg); border-radius: 14px; padding: 0 14px; margin-bottom: 16px; }
+        
+        .item-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .item-row:last-child { border-bottom: none; }
+
+        .item-left { display: flex; align-items: center; flex-grow: 1; margin-right: 12px; }
+        .item-checkbox { width: 22px; height: 22px; margin-right: 12px; cursor: pointer; }
+        .item-details { display: flex; flex-direction: column; }
+        .item-name { font-size: 15px; font-weight: 500; }
+        .item-price { font-size: 13px; color: var(--hint-color); margin-top: 2px; }
+
+        .item-qty {
+            width: 60px; padding: 6px; font-size: 15px; border: 1px solid var(--border-color);
+            border-radius: 8px; background-color: var(--bg-color); color: var(--text-color); text-align: center;
+        }
+        .item-qty:disabled { opacity: 0.3; background-color: transparent; }
+
+        .total-box { background-color: var(--button-color); color: var(--button-text-color); padding: 16px; border-radius: 14px; text-align: center; margin-top: 24px; display: none;}
+        .total-box p { margin: 0 0 4px 0; font-size: 13px; opacity: 0.8; }
+        .total-box h2 { margin: 0; font-size: 26px; font-weight: 700; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1 id="user-greeting">Расчет сметы</h1>
+        <p id="sub-status">Синхронизация с прайсом...</p>
+    </div>
+
+    <div id="loader" class="loader">⏳ Загрузка актуального прайс-листа...</div>
+
+    <div id="catalog-container"></div>
+
+    <div class="total-box" id="total-box">
+        <p>Итоговая сумма</p>
+        <h2 id="total-amount">0.00 руб.</h2>
+    </div>
+
+    <script>
+        // Ссылка на ваш SheetDB API
+        const SHEETDB_URL = "https://sheetdb.io/api/v1/mvh46dq45c7fy";
+
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        if (tg.initDataUnsafe?.user) {
+            document.getElementById('user-greeting').innerText = `${tg.initDataUnsafe.user.first_name}, расчет сметы`;
+        }
+
+        tg.MainButton.setText("Отправить смету боту");
+        tg.MainButton.color = "#2481cc";
+        
+        let finalReport = "";
+
+        // Загрузка данных
+        async function loadPriceList() {
+            try {
+                const response = await fetch(SHEETDB_URL);
+                if (!response.ok) throw new Error('Ошибка сети');
+                
+                const data = await response.json();
+                
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('total-box').style.display = 'block';
+                document.getElementById('sub-status').innerText = 'Выберите позиции для отчета';
+                
+                renderCatalog(data);
+            } catch (error) {
+                console.error(error);
+                document.getElementById('loader').innerText = "❌ Не удалось загрузить прайс. Проверьте таблицу и настройки SheetDB.";
+            }
+        }
+
+        // Отрисовка элементов
+        function renderCatalog(priceList) {
+            const container = document.getElementById('catalog-container');
+            container.innerHTML = '';
+
+            const categories = {};
+            
+            priceList.forEach(item => {
+                // Извлекаем данные по названиям колонок
+                const category = item['Категория'] || "Разное";
+                const name = item['Название'] || "Без названия";
+                const price = parseFloat(String(item['Цена']).replace(',', '.').replace(/\s/g, '')) || 0;
+                const unit = item['Единица'] || "шт";
+
+                if (!categories[category]) categories[category] = [];
+                categories[category].push({ name, price, unit });
+            });
+
+            let globalIndex = 0;
+            for (const categoryName in categories) {
+                let html = `<div class="category-title">${categoryName}</div><div class="card-list">`;
+
+                categories[categoryName].forEach(item => {
+                    html += `
+                        <div class="item-row" data-price="${item.price}" data-name="${item.name}" data-unit="${item.unit}">
+                            <div class="item-left">
+                                <input type="checkbox" class="item-checkbox" onchange="toggleRow(this)">
+                                <div class="item-details">
+                                    <span class="item-name">${item.name}</span>
+                                    <span class="item-price">${item.price.toFixed(2)} руб. / ${item.unit}</span>
+                                </div>
+                            </div>
+                            <input type="number" class="item-qty" value="1" min="1" oninput="calculateTotal()" disabled>
+                        </div>
+                    `;
+                    globalIndex++;
+                });
+
+                html += `</div>`;
+                container.insertAdjacentHTML('beforeend', html);
+            }
+        }
+
+        function toggleRow(checkbox) {
+            const row = checkbox.closest('.item-row');
+            row.querySelector('.item-qty').disabled = !checkbox.checked;
+            calculateTotal();
+        }
+
+        function calculateTotal() {
+            let total = 0;
+            let selectedLines = [];
+            const rows = document.querySelectorAll('.item-row');
+
+            rows.forEach(row => {
+                const checkbox = row.querySelector('.item-checkbox');
+                if (checkbox.checked) {
+                    const price = parseFloat(row.getAttribute('data-price'));
+                    const name = row.getAttribute('data-name');
+                    const unit = row.getAttribute('data-unit');
+                    const qty = parseFloat(row.querySelector('.item-qty').value) || 1;
+                    
+                    const cost = price * qty;
+                    total += cost;
+
+                    selectedLines.push(`• ${name}: ${qty} ${unit} x ${price.toFixed(2)} руб. = ${cost.toFixed(2)} руб.`);
+                }
+            });
+
+            document.getElementById('total-amount').innerText = total.toFixed(2) + ' руб.';
+
+            if (total > 0) {
+                finalReport = `📋 *Новый расчет сметы*\n\n${selectedLines.join('\n')}\n\n💵 *Итого: ${total.toFixed(2)} руб.*`;
+                tg.MainButton.show();
+            } else {
+                tg.MainButton.hide();
+            }
+        }
+
+        tg.MainButton.onClick(() => {
+            if (finalReport) tg.sendData(finalReport);
+        });
+
+        loadPriceList();
+    </script>
+</body>
+</html>
