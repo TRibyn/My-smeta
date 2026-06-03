@@ -23,12 +23,48 @@
             margin: 0;
             padding: 16px;
             box-sizing: border-box;
-            padding-bottom: 80px;
+            padding-bottom: 90px;
         }
 
-        .header { text-align: center; margin-bottom: 20px; }
+        .header { text-align: center; margin-bottom: 16px; }
         .header h1 { font-size: 22px; margin: 0 0 4px 0; }
         .header p { font-size: 14px; color: var(--hint-color); margin: 0; }
+
+        /* Стиль переключателя блоков (Табы) */
+        .tabs-container {
+            display: flex;
+            background-color: var(--secondary-bg);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 16px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: none;
+            border: none;
+            padding: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-color);
+            cursor: pointer;
+            border-radius: 9px;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn.active {
+            background-color: var(--bg-color);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Контент вкладок */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
 
         .loader {
             text-align: center;
@@ -38,11 +74,11 @@
         }
 
         .category-title {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
             text-transform: uppercase;
             color: var(--hint-color);
-            margin: 20px 0 8px 4px;
+            margin: 15px 0 8px 4px;
             letter-spacing: 0.5px;
         }
 
@@ -81,17 +117,27 @@
         <p id="sub-status">Синхронизация с прайсом...</p>
     </div>
 
+    <!-- Индикатор загрузки данных -->
     <div id="loader" class="loader">⏳ Загрузка актуального прайс-листа...</div>
 
-    <div id="catalog-container"></div>
+    <!-- Переключатели основных блоков -->
+    <div class="tabs-container" id="tabs-nav" style="display: none;">
+        <button class="tab-btn active" onclick="switchTab('electro')">⚡ Электромонтаж</button>
+        <button class="tab-btn" onclick="switchTab('video')">👁️ Видеонаблюдение</button>
+    </div>
 
+    <!-- Основной контент блоков -->
+    <div id="electro-tab" class="tab-content active"></div>
+    <div id="video-tab" class="tab-content"></div>
+
+    <!-- Итоговый блок -->
     <div class="total-box" id="total-box">
-        <p>Итоговая сумма</p>
+        <p>Итоговая общая сумма</p>
         <h2 id="total-amount">0.00 руб.</h2>
     </div>
 
     <script>
-        // Ссылка на ваш SheetDB API
+        // Ссылка на твой SheetDB API
         const SHEETDB_URL = "https://sheetdb.io/api/v1/mvh46dq45c7fy";
 
         const tg = window.Telegram.WebApp;
@@ -107,6 +153,22 @@
         
         let finalReport = "";
 
+        // Функция переключения вкладок
+        function switchTab(tabName) {
+            // Сбрасываем активные классы с кнопок и контента
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            // Активируем нужную вкладку
+            if (tabName === 'electro') {
+                document.querySelector('[onclick="switchTab(\'electro\')"]').classList.add('active');
+                document.getElementById('electro-tab').classList.add('active');
+            } else {
+                document.querySelector('[onclick="switchTab(\'video\')"]').classList.add('active');
+                document.getElementById('video-tab').classList.add('active');
+            }
+        }
+
         // Загрузка данных
         async function loadPriceList() {
             try {
@@ -116,25 +178,29 @@
                 const data = await response.json();
                 
                 document.getElementById('loader').style.display = 'none';
+                document.getElementById('tabs-nav').style.display = 'flex';
                 document.getElementById('total-box').style.display = 'block';
                 document.getElementById('sub-status').innerText = 'Выберите позиции для отчета';
                 
                 renderCatalog(data);
             } catch (error) {
                 console.error(error);
-                document.getElementById('loader').innerText = "❌ Не удалось загрузить прайс. Проверьте таблицу и настройки SheetDB.";
+                document.getElementById('loader').innerText = "❌ Не удалось загрузить прайс. Проверьте таблицу.";
             }
         }
 
-        // Отрисовка элементов
+        // Распределение по 2 главным блокам
         function renderCatalog(priceList) {
-            const container = document.getElementById('catalog-container');
-            container.innerHTML = '';
+            const electroTab = document.getElementById('electro-tab');
+            const videoTab = document.getElementById('video-tab');
+            
+            electroTab.innerHTML = '';
+            videoTab.innerHTML = '';
 
             const categories = {};
             
+            // Группируем сначала по подкатегориям из таблицы
             priceList.forEach(item => {
-                // Извлекаем данные по названиям колонок
                 const category = item['Категория'] || "Разное";
                 const name = item['Название'] || "Без названия";
                 const price = parseFloat(String(item['Цена']).replace(',', '.').replace(/\s/g, '')) || 0;
@@ -144,7 +210,7 @@
                 categories[category].push({ name, price, unit });
             });
 
-            let globalIndex = 0;
+            // Рендерим подкатегории в соответствующие главные блоки
             for (const categoryName in categories) {
                 let html = `<div class="category-title">${categoryName}</div><div class="card-list">`;
 
@@ -161,11 +227,17 @@
                             <input type="number" class="item-qty" value="1" min="1" oninput="calculateTotal()" disabled>
                         </div>
                     `;
-                    globalIndex++;
                 });
 
                 html += `</div>`;
-                container.insertAdjacentHTML('beforeend', html);
+                
+                // Проверяем, куда отправить подкатегорию (в Электро или Видео)
+                if (categoryName.toLowerCase().includes('видео')) {
+                    videoTab.insertAdjacentHTML('beforeend', html);
+                } else {
+                    // Все остальное (или содержащее "электро") идет в Электромонтаж
+                    electroTab.insertAdjacentHTML('beforeend', html);
+                }
             }
         }
 
